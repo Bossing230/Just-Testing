@@ -80,27 +80,83 @@ function clean(o){ // remove uneven lighting, then boost contrast
     const r=Math.max(0,Math.min(1,(g/bl-.55)/.4))*255;d.data[i]=d.data[i+1]=d.data[i+2]=r}
   ox.putImageData(d,0,0);
 }
-// read text with Claude
+// ---------- reading the text ----------
+// Optional: URL of your own server. It receives a JPEG (POST body) and must return JSON:
+// {"kind":"text"|"table","blocks":[{"type":"heading|paragraph|list","text":""}],"table":null|{"rows":[[""]]}}
+const OCR_ENDPOINT='';
+const hasClaude=()=>typeof claude!=='undefined'&&claude&&typeof claude.use==='function';
+
 $('read').onclick=async()=>{
   const b=$('read');b.disabled=true;say('Reading the page…');
   try{
-    const sample=await claude.use('sample');
-    if(!sample){say('Reading is not available in this view. Open the page in claude.ai to use it.',1);b.disabled=false;return}
-    const lim=await sample.limits().catch(()=>null);
-    if(!lim||!lim.images){say('Image reading is not available in this view.',1);b.disabled=false;return}
     const blob=await new Promise(r=>$('out').toBlob(r,'image/jpeg',.85));
-    const prompt=`Transcribe the attached scanned document faithfully. Keep the original wording, language and order. Do not invent text; use "?" for illegible parts.
-Return ONLY JSON in this shape:
-{"kind":"text"|"table","blocks":[{"type":"heading"|"paragraph"|"list","text":"..."}],"table":null|{"rows":[["cell","cell"]]}}
-Rules: "kind" is "table" if the page is mainly a grid such as an attendance list, schedule or grade sheet. Put any title or text outside the grid in "blocks". Put the grid in "table.rows" with the header row first, every row with the same number of cells, empty cells as "". For a "list" block, separate items with newline characters.`;
-    doc=await sample.json(prompt,{images:[blob],modelTier:'default',cache:false});
+    doc=null;
+    if(hasClaude()){try{doc=await readWithClaude(blob)}catch(e){doc=null}}
+    if(!doc&&OCR_ENDPOINT){const r=await fetch(OCR_ENDPOINT,{method:'POST',headers:{'Content-Type':'image/jpeg'},body:blob});if(!r.ok)throw new Error('Server error '+r.status);doc=await r.json()}
+    if(!doc)doc=await readLocal();
     if(!doc||typeof doc!=='object')throw new Error('Unexpected reply');
     doc.blocks=Array.isArray(doc.blocks)?doc.blocks:[];
-    if(doc.table&&!Array.isArray(doc.table.rows))doc.table=null;
+    if(!doc.table||!Array.isArray(doc.table.rows)||!doc.table.rows.length)doc.table=null;
     renderEdit();
   }catch(e){say('Could not read the page'+(e&&e.message?': '+e.message:'.')+' Try again with a sharper photo.',1)}
   b.disabled=false;
 };
+
+async function readWithClaude(blob){ // used only inside claude.ai
+  const sample=await claude.use('sample');if(!sample)return null;
+  const lim=await sample.limits().catch(()=>null);if(!lim||!lim.images)return null;
+  const prompt=`Transcribe the attached scanned document faithfully. Keep the original wording, language and order. Do not invent text; use "?" for illegible parts.
+Return ONLY JSON in this shape:
+{"kind":"text"|"table","blocks":[{"type":"heading"|"paragraph"|"list","text":"..."}],"table":null|{"rows":[["cell","cell"]]}}
+Rules: "kind" is "table" if the page is mainly a grid such as an attendance list, schedule or grade sheet. Put any title or text outside the grid in "blocks". Put the grid in "table.rows" with the header row first, every row with the same number of cells, empty cells as "". For a "list" block, separate items with newline characters.`;
+  return sample.json(prompt,{images:[blob],modelTier:'default',cache:false});
+}
+
+async function readLocal(){ // free, in-browser OCR (Tesseract.js)
+  if(!window.Tesseract)throw new Error('the OCR engine did not load. Check your connection and reload');
+  const r=await Tesseract.recognize($('out'),$('lang').value,{logger:m=>{if(m.status==='recognizing text')say('Reading the page… '+Math.round(m.progress*100)+'%')}});
+  return layout(r.data);
+}
+
+// Turns OCR lines + word positions into headings, paragraphs, lists and a table.
+function layout(data){
+  const W=$('out').width;
+  const L=(data.lines||(data.blocks||[]).flatMap(b=>b.paragraphs.flatMap(p=>p.lines))).filter(l=>l.text.trim()&&l.confidence>25);
+  if(!L.length)return{kind:'text',blocks:[],table:null};
+  const hs=L.map(l=>l.bbox.y1-l.bbox.y0).sort((x,y)=>x-y),med=hs[hs.length>>1]||20;
+  L.forEach(l=>{ // split each line into cells wherever there is a wide gap
+    l.h=l.bbox.y1-l.bbox.y0;l.cells=[];let cur=null,prev=null;
+    l.words.filter(w=>w.text.trim()).forEach(w=>{
+      if(cur&&w.bbox.x0-prev.bbox.x1>Math.max(med*1.3,12))cur=null;
+      if(!cur){cur={t:'',x:w.bbox.x0};l.cells.push(cur)}
+      cur.t+=(cur.t?' ':'')+w.text;prev=w});
+  });
+  let t=L.map(l=>l.cells.length>=2);
+  t=t.map((v,i)=>v||(i>0&&i<L.length-1&&t[i-1]&&t[i+1])); // a one-cell row between table rows stays in the table
+  const inTable=Array(L.length).fill(false);
+  for(let i=0;i<L.length;){if(!t[i]){i++;continue}let j=i;while(j<L.length&&t[j])j++;if(j-i>=3)for(let k=i;k<j;k++)inTable[k]=true;i=j}
+  // column anchors from the x position of every table cell
+  const xs=[];L.forEach((l,i)=>{if(inTable[i])l.cells.forEach(c=>xs.push(c.x))});xs.sort((p,q)=>p-q);
+  const anchors=[];xs.forEach(x=>{const a=anchors[anchors.length-1];if(a&&x-a.last<W*.035){a.sum+=x;a.n++;a.last=x}else anchors.push({sum:x,n:1,last:x})});
+  const cols=anchors.map(a=>a.sum/a.n);
+  const rows=[];
+  L.forEach((l,i)=>{if(!inTable[i])return;const row=Array(cols.length).fill('');
+    l.cells.forEach(c=>{let k=0,best=1e9;cols.forEach((cx,ci)=>{const d=Math.abs(cx-c.x);if(d<best){best=d;k=ci}});row[k]=(row[k]?row[k]+' ':'')+c.t});rows.push(row)});
+  // everything else becomes blocks
+  const blocks=[];let last=null,prevY=null;
+  L.forEach((l,i)=>{
+    if(inTable[i]){last=null;return}
+    const tx=l.text.trim(),isList=/^([-•*·]|\d+[.)])\s+/.test(tx),letters=tx.replace(/[^A-Za-z]/g,'');
+    const isHead=!isList&&(l.h>med*1.35||(letters.length>3&&tx.split(/\s+/).length<=8&&tx===tx.toUpperCase()));
+    const type=isHead?'heading':isList?'list':'paragraph';
+    const close=prevY!==null&&l.bbox.y0-prevY<med*.9;
+    if(last&&close&&last.type===type&&type!=='heading')last.text+=(type==='list'?'\n':' ')+tx;
+    else{last={type,text:tx};blocks.push(last)}
+    prevY=l.bbox.y1});
+  blocks.forEach(b=>{if(b.type==='list')b.text=b.text.split('\n').map(s=>s.replace(/^([-•*·]|\d+[.)])\s+/,'')).join('\n')});
+  const share=inTable.filter(Boolean).length/L.length;
+  return{kind:share>=.35?'table':'text',blocks,table:rows.length?{rows}:null};
+}
 function renderEdit(){
   show('s-edit',1);
   const r=$('ref'),o=$('out');r.width=o.width;r.height=o.height;r.getContext('2d').drawImage(o,0,0);
@@ -128,9 +184,14 @@ $('addrow').onclick=()=>{const t=doc.table.rows;t.push(Array(t[0].length).fill('
 $('addcol').onclick=()=>{doc.table.rows.forEach(r=>r.push(''));renderEdit()};
 
 async function save(name,data){
-  try{const d=await claude.use('downloads');if(!d){say('Downloads are not available in this view. Open the page in claude.ai to save files.',1);return}
-    await d.save({filename:name,data});say('Saved '+name+'.')}
-  catch(e){if(e&&e.code==='declined')say('Download cancelled.');else say('Could not save the file ('+((e&&e.code)||'error')+').',1)}
+  const blob=data instanceof Blob?data:new Blob([data]);
+  if(hasClaude()){ // inside claude.ai the viewer confirms each save
+    try{const d=await claude.use('downloads');if(d){await d.save({filename:name,data:blob});say('Saved '+name+'.');return}}
+    catch(e){if(e&&e.code==='declined'){say('Download cancelled.');return}}
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  say('Saved '+name+'.');
 }
 $('dl-docx').onclick=async()=>{
   const D=window.docx;if(!D){say('The Word builder did not load. Check your connection and reload.',1);return}

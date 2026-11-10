@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flatbed – photo to editable Word & Excel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <nav><b>Flatbed</b><a class="btn primary" href="#scan">Scan a page</a></nav>
+  <header class="hero">
+    <div>
+      <h1>Snap a handout. Get a file you can edit.</h1>
+      <p>Flatbed straightens a phone photo of any paper, reads it, and hands you a Word document. Attendance lists and grade sheets come out as Excel, with rows and columns where you saw them.</p>
+      <div class="row"><a class="btn primary" href="#scan">Scan a page</a><a class="btn" href="#how">See how it works</a></div>
+    </div>
+    <div class="stage" aria-hidden="true"><div class="sheet"><i class="h"></i><i></i><i></i><i class="m"></i><i></i><i></i><i></i><i class="m"></i><i></i></div><div class="scan"></div></div>
+  </header>
+
+  <section class="block" id="how">
+    <h2>From crooked photo to finished file</h2>
+    <ol class="steps">
+      <li><h3>Straighten</h3><p>Drag four corners onto the page. Flatbed flattens the angle and removes shadows.</p></li>
+      <li><h3>Read</h3><p>Headings, paragraphs, lists and tables are found and kept in order.</p></li>
+      <li><h3>Check</h3><p>The scan sits next to the result. Fix any word before you export.</p></li>
+      <li><h3>Download</h3><p>Word for text, Excel for tables. Both open ready to edit.</p></li>
+    </ol>
+  </section>
+
+  <section class="block">
+    <div class="two">
+      <div><h3>Word for handouts</h3><p>Letters, notices, lesson sheets and forms become a .docx with real headings, paragraphs and bullet lists, not a picture of text.</p></div>
+      <div><h3>Excel for lists</h3><p>Attendance lists, schedules and score sheets become a .xlsx. Each row stays a row, each column stays a column.</p></div>
+    </div>
+    <p class="note" style="margin-top:26px">Be aware: phone photos and handwriting are hard to read. Flatbed matches the structure and order of the page, not the exact position of every word, so always glance at the check step.</p>
+  </section>
+
+  <main id="scan">
+    <div class="app">
+      <h2>Scan a page</h2>
+      <p class="status" id="status">Choose a photo of a document to begin.</p>
+
+      <div id="s-pick" class="drop">
+        <label class="btn primary" for="file">Take or choose a photo</label>
+        <input id="file" type="file" accept="image/*" capture="environment" class="hide">
+        <p>JPG or PNG. Good light and a flat page give the best result.</p>
+      </div>
+
+      <div id="s-crop" class="hide">
+        <div class="cols">
+          <div class="pane"><h3>1. Mark the page corners</h3>
+            <div class="cv" id="cropbox"><canvas id="src"></canvas><svg id="poly" preserveAspectRatio="none"><polygon fill="rgba(11,127,134,.15)" stroke="#0b7f86" stroke-width="2" vector-effect="non-scaling-stroke"/></svg></div>
+            <div class="bar"><button class="btn primary" id="flat">Straighten and clean</button><button class="btn" id="reset">Choose another photo</button></div>
+          </div>
+          <div class="pane"><h3>Cleaned scan</h3><div class="cv"><canvas id="out"></canvas></div>
+            <div class="bar"><button class="btn primary" id="read" disabled>Read the text</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="s-edit" class="hide">
+        <h3 style="margin-top:18px;font-size:1.3rem">2. Check and edit</h3>
+        <p class="status" id="kind"></p>
+        <div class="cols">
+          <div class="pane"><h3>Scan</h3><div class="cv"><canvas id="ref"></canvas></div></div>
+          <div class="pane"><h3>Extracted</h3>
+            <div id="blocks"></div>
+            <div id="tbl" class="tw"></div>
+            <div class="bar" id="tbar"><button class="btn" id="addrow">Add row</button><button class="btn" id="addcol">Add column</button></div>
+          </div>
+        </div>
+        <div class="bar"><button class="btn primary" id="dl-docx">Download Word (.docx)</button><button class="btn primary" id="dl-xlsx">Download Excel (.xlsx)</button></div>
+      </div>
+    </div>
+  </main>
+  <footer>Your photo is processed in your browser. Only the cleaned page image is sent to Claude to read the text.</footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
